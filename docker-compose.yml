@@ -1,0 +1,39 @@
+services:
+  dashboard:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dashboard
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    command: "streamlit run /app/src/dashboard.py --server.port=8501 --server.address=0.0.0.0"
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: technical_assessment
+    ports:
+      - 5432:5432
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./sql:/docker-entrypoint-initdb.d:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  mypy:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: mypy
+    tty: true
+    command: "mypy --config-file=.mypy.ini src/"
+
+volumes:
+  postgres_data:
