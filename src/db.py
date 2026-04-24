@@ -1,6 +1,7 @@
 import os
 import threading
 import uuid
+import time
 from contextlib import contextmanager
 from typing import Any, Generator
 
@@ -100,7 +101,6 @@ def create_element(user_uri: str, space_uri: str, type_uri: str, title: str) -> 
         VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING uri, title, type_uri, space_uri, creation_date, author
     """
-    import time
     creation_date = int(time.time() * 1000)
     with get_cursor() as cur:
         cur.execute(sql, (element_uri, title, type_uri, space_uri, creation_date, user_uri))
