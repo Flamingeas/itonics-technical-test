@@ -6,11 +6,13 @@ services:
       - "11434:11434"
     volumes:
       - ollama_data:/root/.ollama
+    entrypoint: ["/bin/sh", "-c", "/bin/ollama serve & sleep 5 && /bin/ollama pull llama3.1 && wait"]
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:11434 || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "ollama list 2>/dev/null | grep -q llama3.1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 20
+      start_period: 30s
   dashboard:
     build:
       context: .

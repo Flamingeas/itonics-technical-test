@@ -26,7 +26,7 @@ from chat_utils import (
 
 CURRENT_USER = os.getenv("CURRENT_USER", "user:alice")
 
-_llm = ChatOllama(model="llama3", base_url="http://ollama:11434")
+_llm = ChatOllama(model="llama3.1", base_url="http://ollama:11434")
 
 
 @tool
@@ -47,7 +47,44 @@ def search_elements_tool(space_uri: str, query: str) -> str:
     return "\n".join(lines)
 
 
-_tools = [search_elements_tool]
+@tool
+def create_element_tool(space_uri: str, type_uri: str, title: str) -> str:
+    """Create a new element in a space.
+
+    Args:
+        space_uri: URI of the space (e.g. 'space:acme-projects').
+        type_uri: URI of the element type (e.g. 'type:project').
+        title: Title for the new element.
+    """
+    try:
+        element = db.create_element(CURRENT_USER, space_uri, type_uri, title)
+    except PermissionError as e:
+        return f"Permission denied: {e}"
+    except Exception as e:
+        return f"Database error while creating element: {e}"
+    return f"Created element {element['uri']!r} with title {element['title']!r}."
+
+
+@tool
+def update_element_title_tool(element_uri: str, new_title: str) -> str:
+    """Update the title of an existing element.
+
+    Args:
+        element_uri: URI of the element to update (e.g. 'element:acme-projects:abc123').
+        new_title: The new title to set.
+    """
+    try:
+        element = db.update_element_title(CURRENT_USER, element_uri, new_title)
+    except PermissionError as e:
+        return f"Permission denied: {e}"
+    except ValueError as e:
+        return f"Element not found: {e}"
+    except Exception as e:
+        return f"Database error while updating element: {e}"
+    return f"Updated element {element['uri']!r} — new title: {element['title']!r}."
+
+
+_tools = [search_elements_tool, create_element_tool, update_element_title_tool]
 _llm_with_tools = _llm.bind_tools(_tools)
 _tool_map = {t.name: t for t in _tools}
 
