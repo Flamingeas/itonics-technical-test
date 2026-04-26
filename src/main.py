@@ -104,6 +104,18 @@ def _run_elements_agent(user_message: str) -> str:
             messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
 
 
+@tool
+def call_elements_agent_tool(task: str) -> str:
+    """Delegate element-related tasks to the elements agent.
+
+    Use this for: searching elements, creating elements, updating element titles.
+    Args:
+        task: Natural language description of the task
+              (e.g. 'search for ideas in space:acme-projects').
+    """
+    return _run_elements_agent(task)
+
+
 def handle_user_input(user_input: str) -> None:
     """
     Process user input and generate a response.
