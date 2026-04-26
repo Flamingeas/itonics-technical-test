@@ -13,7 +13,8 @@ Available functions:
 
 from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
-from langchain_core.messages import HumanMessage, ToolMessage, AIMessage
+from langchain_core.messages import HumanMessage, ToolMessage, AIMessage, BaseMessage, SystemMessage
+from message_broker import ChatMessage
 
 import os
 import db
@@ -121,8 +122,40 @@ _orchestrator_llm_with_tools = _llm.bind_tools(_orchestrator_tools)
 _orchestrator_tool_map = {t.name: t for t in _orchestrator_tools}
 
 
-def _run_orchestrator(user_message: str) -> str:
-    messages: list = [HumanMessage(content=user_message)]
+def _build_history_messages(history: list[ChatMessage]) -> list[BaseMessage]:
+    """Reconstruct full conversation from streamed chat history chunks."""
+    if not history:
+        return []
+    result: list[BaseMessage] = []
+    current_id = history[0].interaction_id
+    current_role = history[0].role
+    current_content = history[0].content
+    for msg in history[1:]:
+        if msg.interaction_id == current_id and msg.role == current_role:
+            current_content += msg.content
+        else:
+            if current_role == "user":
+                result.append(HumanMessage(content=current_content))
+            elif current_role == "assistant":
+                result.append(AIMessage(content=current_content))
+            current_id = msg.interaction_id
+            current_role = msg.role
+            current_content = msg.content
+    if current_role == "user":
+        result.append(HumanMessage(content=current_content))
+    elif current_role == "assistant":
+        result.append(AIMessage(content=current_content))
+    return result
+
+
+_ORCHESTRATOR_SYSTEM = SystemMessage(content=(
+    "For casual conversation or general questions, reply directly. "
+    "For tasks involving elements (search, create, update), delegate to the elements agent tool."
+))
+
+
+def _run_orchestrator(user_message: str, history: list[BaseMessage]) -> str:
+    messages: list = [_ORCHESTRATOR_SYSTEM, *history, HumanMessage(content=user_message)]
     while True:
         try:
             response: AIMessage = _orchestrator_llm_with_tools.invoke(messages)
@@ -164,9 +197,10 @@ def handle_user_input(user_input: str) -> None:
         stream_assistant_response(response, interaction_id)
     """
     interaction_id = generate_interaction_id()
+    history = _build_history_messages(get_chat_history())
     send_user_message(user_input, interaction_id)
     try:
-        reply = _run_elements_agent(user_input)
+        reply = _run_orchestrator(user_input, history)
     except Exception as e:
         reply = f"Unexpected error: {e}"
     stream_assistant_response(reply, interaction_id)
