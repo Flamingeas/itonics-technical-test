@@ -116,6 +116,26 @@ def call_elements_agent_tool(task: str) -> str:
     return _run_elements_agent(task)
 
 
+_orchestrator_tools = [call_elements_agent_tool]
+_orchestrator_llm_with_tools = _llm.bind_tools(_orchestrator_tools)
+_orchestrator_tool_map = {t.name: t for t in _orchestrator_tools}
+
+
+def _run_orchestrator(user_message: str) -> str:
+    messages: list = [HumanMessage(content=user_message)]
+    while True:
+        try:
+            response: AIMessage = _orchestrator_llm_with_tools.invoke(messages)
+        except Exception as e:
+            return f"The assistant is temporarily unavailable: {e}"
+        messages.append(response)
+        if not response.tool_calls:
+            return str(response.content)
+        for tc in response.tool_calls:
+            result = _orchestrator_tool_map[tc["name"]].invoke(tc["args"])
+            messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+
+
 def handle_user_input(user_input: str) -> None:
     """
     Process user input and generate a response.
