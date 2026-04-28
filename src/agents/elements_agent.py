@@ -1,5 +1,4 @@
 import os
-
 import db
 from agents.llm import _llm, _parse_python_tag_calls
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage, SystemMessage
@@ -127,7 +126,10 @@ def run_elements_agent(user_message: str) -> str:
         results: list[str] = []
         for tc in tool_calls:
             name = tc["name"]
-            result = _tool_map[name].invoke(tc["args"]) if name in _tool_map else f"Unknown tool: {name}"
+            try:
+                result = _tool_map[name].invoke(tc["args"]) if name in _tool_map else f"Unknown tool: {name}"
+            except Exception as e:
+                result = f"Tool call failed — missing or invalid arguments: {e}. Please retry with all required parameters."
             results.append(str(result))
             messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         if any(tc["name"] in _ACTION_TOOLS for tc in tool_calls):
