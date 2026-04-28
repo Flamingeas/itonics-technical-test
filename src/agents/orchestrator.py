@@ -1,8 +1,8 @@
-from langchain_core.messages import HumanMessage, ToolMessage, AIMessage, BaseMessage, SystemMessage
+from langchain_core.messages import HumanMessage, BaseMessage, SystemMessage
 from langchain_core.tools import tool
 
 from agents.elements_agent import run_elements_agent
-from agents.llm import _llm, _parse_python_tag_calls
+from agents.llm import _llm, run_react_loop
 
 
 @tool
@@ -22,30 +22,21 @@ _orchestrator_llm_with_tools = _llm.bind_tools(_orchestrator_tools)
 _orchestrator_tool_map = {t.name: t for t in _orchestrator_tools}
 
 _SYSTEM = SystemMessage(content=(
-    "For casual conversation or general questions, reply directly. "
-    "For tasks involving elements (search, create, update), delegate to the els agent tool."
+    "Reply directly to casual questions. "
+    "For element tasks (search/create/update), use call_elements_agent_tool."
 ))
 
 
+_ELEMENT_KEYWORDS = {"create", "search", "find", "update", "rename", "element", "idea", "task", "project"}
+
+
+def _is_element_task(message: str) -> bool:
+    words = set(message.lower().split())
+    return bool(words & _ELEMENT_KEYWORDS)
+
+
 def run_orchestrator(user_message: str, history: list[BaseMessage]) -> str:
+    if _is_element_task(user_message):
+        return run_elements_agent(user_message)
     messages: list = [_SYSTEM, *history, HumanMessage(content=user_message)]
-    while True:
-        try:
-            response: AIMessage = _orchestrator_llm_with_tools.invoke(messages)
-        except Exception as e:
-            return f"The assistant is temporarily unavailable: {e}"
-        messages.append(response)
-        tool_calls = response.tool_calls or _parse_python_tag_calls(str(response.content))
-        if not tool_calls:
-            return str(response.content)
-        results: list[str] = []
-        for tc in tool_calls:
-            name = tc["name"]
-            try:
-                result = _orchestrator_tool_map[name].invoke(tc["args"]) if name in _orchestrator_tool_map else f"Unknown tool: {name}"
-            except Exception as e:
-                result = f"Tool call failed — missing or invalid arguments: {e}. Please retry with all required parameters."
-            results.append(str(result))
-            messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
-        # The els agent already returns a final answer.
-        return "\n".join(results)
+    return run_react_loop(messages, _orchestrator_llm_with_tools, _orchestrator_tool_map)

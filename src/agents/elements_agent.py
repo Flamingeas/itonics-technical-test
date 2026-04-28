@@ -1,7 +1,7 @@
 import os
 import db
-from agents.llm import _llm, _parse_python_tag_calls
-from langchain_core.messages import HumanMessage, ToolMessage, AIMessage, SystemMessage
+from agents.llm import _llm, run_react_loop
+from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 
 CURRENT_USER = os.getenv("CURRENT_USER")
@@ -101,36 +101,37 @@ _llm_with_tools = _llm.bind_tools(_tools)
 _tool_map = {t.name: t for t in _tools}
 
 _SYSTEM = SystemMessage(content=(
-    "You are an elements agent. "
-    "If the user does not specify a space URI, call list_spaces_tool first to discover available spaces, "
-    "then proceed with the requested operation. "
-    "If the user wants to create an element and does not specify a type URI, call list_types_tool first. "
-    "Never use placeholder or null values for required parameters."
+    "Elements agent. Use the provided context to call tools with correct URIs. "
+    "For create/update: only use spaces with write=yes. "
+    "All tool parameters are required — never omit them."
 ))
 
 # Discovery tools need a follow-up LLM call; action tools return a final answer.
 _ACTION_TOOLS = {"search_elements_tool", "create_element_tool", "update_element_title_tool"}
 
 
-def run_elements_agent(user_message: str) -> str:
-    messages: list = [_SYSTEM, HumanMessage(content=user_message)]
-    while True:
-        try:
-            response: AIMessage = _llm_with_tools.invoke(messages)
-        except Exception as e:
-            return f"The assistant is temporarily unavailable: {e}"
-        messages.append(response)
-        tool_calls = response.tool_calls or _parse_python_tag_calls(str(response.content))
-        if not tool_calls:
-            return str(response.content)
-        results: list[str] = []
-        for tc in tool_calls:
-            name = tc["name"]
+def _build_context() -> str:
+    """Pre-load spaces and types so the LLM has all info before its first call."""
+    try:
+        spaces = db.list_user_spaces(CURRENT_USER)
+    except Exception as e:
+        return f"Could not load spaces: {e}"
+    if not spaces:
+        return "No spaces available for the current user."
+    lines = ["Available spaces (write: yes = you can create/update here):"]
+    for s in spaces:
+        lines.append(f"  - {s['uri']}: {s['name']} (write: {'yes' if s['can_write'] else 'no'})")
+        if s["can_write"]:
             try:
-                result = _tool_map[name].invoke(tc["args"]) if name in _tool_map else f"Unknown tool: {name}"
-            except Exception as e:
-                result = f"Tool call failed — missing or invalid arguments: {e}. Please retry with all required parameters."
-            results.append(str(result))
-            messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
-        if any(tc["name"] in _ACTION_TOOLS for tc in tool_calls):
-            return "\n".join(results)
+                types = db.list_types_in_space(s["uri"])
+                for t in types:
+                    lines.append(f"      type: {t['uri']} ({t['name']})")
+            except Exception:
+                pass
+    return "\n".join(lines)
+
+
+def run_elements_agent(user_message: str) -> str:
+    context = _build_context()
+    messages: list = [_SYSTEM, SystemMessage(content=context), HumanMessage(content=user_message)]
+    return run_react_loop(messages, _llm_with_tools, _tool_map, stop_on=_ACTION_TOOLS)
