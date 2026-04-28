@@ -109,16 +109,20 @@ def create_element(user_uri: str, space_uri: str, type_uri: str, title: str) -> 
 
 
 def list_user_spaces(user_uri: str) -> list[dict[str, Any]]:
-    """Return all spaces the user has access to."""
+    """Return all spaces the user has access to, with write permission flag."""
     sql = """
-        SELECT s.uri, s.name, s.tenant_uri
+        SELECT s.uri, s.name, s.tenant_uri,
+               EXISTS (
+                   SELECT 1 FROM public.user_space_permissions p
+                   WHERE p.user_uri = %s AND p.space_uri = s.uri AND p.verb_uri = %s
+               ) AS can_write
         FROM public.spaces s
         JOIN public.user_spaces us ON us.space_uri = s.uri
         WHERE us.user_uri = %s
         ORDER BY s.uri
     """
     with get_cursor() as cur:
-        cur.execute(sql, (user_uri,))
+        cur.execute(sql, (user_uri, WRITE_VERB, user_uri))
         return [dict(row) for row in cur.fetchall()]
 
 
