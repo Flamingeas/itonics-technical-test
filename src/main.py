@@ -15,8 +15,11 @@ from langchain_core.tools import tool
 from langchain_ollama import ChatOllama
 from langchain_core.messages import HumanMessage, ToolMessage, AIMessage, BaseMessage, SystemMessage
 from message_broker import ChatMessage
+from typing import Any
 
+import json
 import os
+import re
 import db
 from chat_utils import (
     generate_interaction_id,
@@ -25,7 +28,26 @@ from chat_utils import (
     stream_assistant_response,
 )
 
-CURRENT_USER = os.getenv("CURRENT_USER", "user:alice")
+CURRENT_USER = os.getenv("CURRENT_USER")
+
+
+def _parse_python_tag_calls(content: str) -> list[dict[str, Any]]:
+    """Parse llama3.1's native tool calls.
+    The model uses 'parameters' as the key; we normalise to 'args' for consistency.
+    """
+    calls: list[dict[str, Any]] = []
+    for match in re.finditer(r"<\|python_tag\|>(\{.*?\})\s*(?=<\|python_tag\|>|$)", content, re.DOTALL):
+        try:
+            data = json.loads(match.group(1))
+        except json.JSONDecodeError:
+            continue
+        name = data.get("name")
+        if not name:
+            continue
+        args = data.get("parameters", data.get("arguments", data.get("args", {})))
+        calls.append({"name": name, "args": args, "id": f"ptag_{len(calls)}"})
+    return calls
+
 
 _llm = ChatOllama(model="llama3.1", base_url="http://ollama:11434")
 
@@ -35,8 +57,9 @@ def search_elements_tool(space_uri: str, query: str) -> str:
     """Search for elements whose title contains *query* inside *space_uri*.
 
     Args:
-        space_uri: URI of the space to search in (e.g. 'space:abc123').
+        space_uri: URI of the space to search in (e.g. 'space:acme-projects').
         query: Keyword to look for in element titles (case-insensitive).
+               Use an empty string "" to list all elements in the space.
     """
     try:
         results = db.search_elements(space_uri, query)
@@ -67,6 +90,19 @@ def create_element_tool(space_uri: str, type_uri: str, title: str) -> str:
 
 
 @tool
+def list_spaces_tool() -> str:
+    """List all spaces the current user has access to, with their URIs and tenant."""
+    try:
+        spaces = db.list_user_spaces(CURRENT_USER)
+    except Exception as e:
+        return f"Database error while listing spaces: {e}"
+    if not spaces:
+        return "No spaces found for the current user."
+    lines = [f"- {s['uri']}: {s['name']} (tenant: {s['tenant_uri']})" for s in spaces]
+    return "\n".join(lines)
+
+
+@tool
 def update_element_title_tool(element_uri: str, new_title: str) -> str:
     """Update the title of an existing element.
 
@@ -85,24 +121,43 @@ def update_element_title_tool(element_uri: str, new_title: str) -> str:
     return f"Updated element {element['uri']!r} — new title: {element['title']!r}."
 
 
-_tools = [search_elements_tool, create_element_tool, update_element_title_tool]
+_tools = [list_spaces_tool, search_elements_tool, create_element_tool, update_element_title_tool]
 _llm_with_tools = _llm.bind_tools(_tools)
 _tool_map = {t.name: t for t in _tools}
 
 
+_ELEMENTS_AGENT_SYSTEM = SystemMessage(content=(
+    "You are an elements agent. "
+    "If the user does not specify a space URI, call list_spaces_tool first to discover available spaces, "
+    "then proceed with the requested operation. "
+    "Never use placeholder or null values for required parameters."
+))
+
+
+# list_spaces_tool is a discovery step; the LLM must loop back to use its output.
+_ELEMENTS_ACTION_TOOLS = {"search_elements_tool", "create_element_tool", "update_element_title_tool"}
+
+
 def _run_elements_agent(user_message: str) -> str:
-    messages: list = [HumanMessage(content=user_message)]
+    messages: list = [_ELEMENTS_AGENT_SYSTEM, HumanMessage(content=user_message)]
     while True:
         try:
             response: AIMessage = _llm_with_tools.invoke(messages)
         except Exception as e:
             return f"The assistant is temporarily unavailable: {e}"
         messages.append(response)
-        if not response.tool_calls:
+        tool_calls = response.tool_calls or _parse_python_tag_calls(str(response.content))
+        if not tool_calls:
             return str(response.content)
-        for tc in response.tool_calls:
-            result = _tool_map[tc["name"]].invoke(tc["args"])
+        results: list[str] = []
+        for tc in tool_calls:
+            name = tc["name"]
+            result = _tool_map[name].invoke(tc["args"]) if name in _tool_map else f"Unknown tool: {name}"
+            results.append(str(result))
             messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+        # Discovery tools (list_spaces) need a follow-up LLM call to use their output.
+        if any(tc["name"] in _ELEMENTS_ACTION_TOOLS for tc in tool_calls):
+            return "\n".join(results)
 
 
 @tool
@@ -162,11 +217,17 @@ def _run_orchestrator(user_message: str, history: list[BaseMessage]) -> str:
         except Exception as e:
             return f"The assistant is temporarily unavailable: {e}"
         messages.append(response)
-        if not response.tool_calls:
+        tool_calls = response.tool_calls or _parse_python_tag_calls(str(response.content))
+        if not tool_calls:
             return str(response.content)
-        for tc in response.tool_calls:
-            result = _orchestrator_tool_map[tc["name"]].invoke(tc["args"])
+        results: list[str] = []
+        for tc in tool_calls:
+            name = tc["name"]
+            result = _orchestrator_tool_map[name].invoke(tc["args"]) if name in _orchestrator_tool_map else f"Unknown tool: {name}"
+            results.append(str(result))
             messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
+        # The elements agent already returns a final answer
+        return "\n".join(results)
 
 
 def handle_user_input(user_input: str) -> None:
@@ -203,4 +264,4 @@ def handle_user_input(user_input: str) -> None:
         reply = _run_orchestrator(user_input, history)
     except Exception as e:
         reply = f"Unexpected error: {e}"
-    stream_assistant_response(reply, interaction_id)
+    stream_assistant_response(reply, interaction_id, chunk_size=15, delay=0.03)
