@@ -122,6 +122,19 @@ def list_user_spaces(user_uri: str) -> list[dict[str, Any]]:
         return [dict(row) for row in cur.fetchall()]
 
 
+def list_types_in_space(space_uri: str) -> list[dict[str, Any]]:
+    """Return all element types defined in a space."""
+    sql = """
+        SELECT uri, name
+        FROM public.types
+        WHERE space_uri = %s
+        ORDER BY name
+    """
+    with get_cursor() as cur:
+        cur.execute(sql, (space_uri,))
+        return [dict(row) for row in cur.fetchall()]
+
+
 def update_element_title(user_uri: str, element_uri: str, new_title: str) -> dict[str, Any]:
     """Update an element's title atomically. Raises ValueError if not found, PermissionError if unauthorized."""
     update_sql = """

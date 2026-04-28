@@ -103,6 +103,23 @@ def list_spaces_tool() -> str:
 
 
 @tool
+def list_types_tool(space_uri: str) -> str:
+    """List all element types available in a space.
+
+    Args:
+        space_uri: URI of the space (e.g. 'space:acme-projects').
+    """
+    try:
+        types = db.list_types_in_space(space_uri)
+    except Exception as e:
+        return f"Database error while listing types: {e}"
+    if not types:
+        return f"No types found in space {space_uri!r}."
+    lines = [f"- {t['uri']}: {t['name']}" for t in types]
+    return "\n".join(lines)
+
+
+@tool
 def update_element_title_tool(element_uri: str, new_title: str) -> str:
     """Update the title of an existing element.
 
@@ -121,7 +138,7 @@ def update_element_title_tool(element_uri: str, new_title: str) -> str:
     return f"Updated element {element['uri']!r} — new title: {element['title']!r}."
 
 
-_tools = [list_spaces_tool, search_elements_tool, create_element_tool, update_element_title_tool]
+_tools = [list_spaces_tool, list_types_tool, search_elements_tool, create_element_tool, update_element_title_tool]
 _llm_with_tools = _llm.bind_tools(_tools)
 _tool_map = {t.name: t for t in _tools}
 
@@ -130,11 +147,12 @@ _ELEMENTS_AGENT_SYSTEM = SystemMessage(content=(
     "You are an elements agent. "
     "If the user does not specify a space URI, call list_spaces_tool first to discover available spaces, "
     "then proceed with the requested operation. "
+    "If the user wants to create an element and does not specify a type URI, call list_types_tool first. "
     "Never use placeholder or null values for required parameters."
 ))
 
 
-# list_spaces_tool is a discovery step; the LLM must loop back to use its output.
+# list_spaces_tool & type_tools are just a discovery steps; not actual el tool here
 _ELEMENTS_ACTION_TOOLS = {"search_elements_tool", "create_element_tool", "update_element_title_tool"}
 
 
@@ -155,7 +173,7 @@ def _run_elements_agent(user_message: str) -> str:
             result = _tool_map[name].invoke(tc["args"]) if name in _tool_map else f"Unknown tool: {name}"
             results.append(str(result))
             messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
-        # Discovery tools (list_spaces) need a follow-up LLM call to use their output.
+        # Discovery tools (list_spaces, list_types_in_space) need a follow-up LLM call to use their output
         if any(tc["name"] in _ELEMENTS_ACTION_TOOLS for tc in tool_calls):
             return "\n".join(results)
 
@@ -258,8 +276,11 @@ def handle_user_input(user_input: str) -> None:
         stream_assistant_response(response, interaction_id)
     """
     interaction_id = generate_interaction_id()
-    history = _build_history_messages(get_chat_history())
     send_user_message(user_input, interaction_id)
+    if not CURRENT_USER:
+        stream_assistant_response("No user configured. Set the CURRENT_USER environment variable.", interaction_id)
+        return
+    history = _build_history_messages(get_chat_history())
     try:
         reply = _run_orchestrator(user_input, history)
     except Exception as e:
