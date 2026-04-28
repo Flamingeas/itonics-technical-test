@@ -108,6 +108,20 @@ def create_element(user_uri: str, space_uri: str, type_uri: str, title: str) -> 
         return dict(row)
 
 
+def list_user_spaces(user_uri: str) -> list[dict[str, Any]]:
+    """Return all spaces the user has access to."""
+    sql = """
+        SELECT s.uri, s.name, s.tenant_uri
+        FROM public.spaces s
+        JOIN public.user_spaces us ON us.space_uri = s.uri
+        WHERE us.user_uri = %s
+        ORDER BY s.uri
+    """
+    with get_cursor() as cur:
+        cur.execute(sql, (user_uri,))
+        return [dict(row) for row in cur.fetchall()]
+
+
 def update_element_title(user_uri: str, element_uri: str, new_title: str) -> dict[str, Any]:
     """Update an element's title atomically. Raises ValueError if not found, PermissionError if unauthorized."""
     update_sql = """
