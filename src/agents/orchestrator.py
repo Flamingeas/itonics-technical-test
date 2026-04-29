@@ -27,7 +27,7 @@ _SYSTEM = SystemMessage(content=(
 ))
 
 
-_ELEMENT_KEYWORDS = {"create", "search", "find", "update", "rename", "element", "idea", "task", "project"}
+_ELEMENT_KEYWORDS = {"create", "search", "find", "update", "rename", "element", "idea", "task", "project", "read", "admin", "write", "delete"}
 
 
 def _is_element_task(message: str) -> bool:
