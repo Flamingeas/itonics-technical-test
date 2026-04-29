@@ -1,10 +1,14 @@
 import os
+import time
 import db
 from agents.llm import _llm, run_react_loop
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.tools import tool
 
 CURRENT_USER = os.getenv("CURRENT_USER")
+
+_context_cache: dict[str, tuple[str, float]] = {}  # user_uri -> context & timestamp
+_CACHE_TTL = 300  # seconds; store for 4-5min
 
 
 @tool
@@ -111,7 +115,17 @@ _ACTION_TOOLS = {"search_elements_tool", "create_element_tool", "update_element_
 
 
 def _build_context() -> str:
-    """Pre-load spaces and types so the LLM has all info before its first call."""
+    """Pre-load spaces and types so the LLM has all info before its first call.
+
+    Result is cached per user for _CACHE_TTL seconds to avoid redundant DB calls
+    across consecutive messages within the same session.
+    """
+    now = time.time()
+    if CURRENT_USER and CURRENT_USER in _context_cache:
+        cached_context, cached_at = _context_cache[CURRENT_USER]
+        if now - cached_at < _CACHE_TTL:
+            return cached_context
+
     try:
         spaces = db.list_user_spaces(CURRENT_USER)
     except Exception as e:
@@ -128,7 +142,10 @@ def _build_context() -> str:
                     lines.append(f"      type: {t['uri']} ({t['name']})")
             except Exception:
                 pass
-    return "\n".join(lines)
+    context = "\n".join(lines)
+    if CURRENT_USER:
+        _context_cache[CURRENT_USER] = (context, now)
+    return context
 
 
 def run_elements_agent(user_message: str) -> str:
