@@ -54,6 +54,14 @@ services:
     tty: true
     command: "mypy --config-file=.mypy.ini src/"
 
+  pytest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: pytest
+    tty: true
+    command: "pytest tests/ -v"
+
 volumes:
   postgres_data:
   ollama_data:
