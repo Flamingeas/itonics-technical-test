@@ -352,3 +352,63 @@ The agent runs a ReAct loop (`run_react_loop` in `src/agents/llm.py`). Discovery
 ### Context pre-loading
 
 Before the first LLM call, `_build_context()` queries the user's accessible spaces and the types of each writable space, then injects an explicit `name → uri` mapping as a `SystemMessage`. The LLM uses this to resolve natural language ("Projects", "Task") to the correct URIs internally, without ever exposing them to the user. The result is cached per user for 5 minutes to reduce DB round-trips.
+
+### Permission model
+
+Permissions are enforced at the space level via `user_space_permissions`. `db.has_permission(user_uri, space_uri, "verb:write")` is called inside `create_element` and `update_element_title` before any write. `PermissionError` propagates to the tool layer where it is caught and returned as a user-friendly message.
+
+
+### SQL safety
+
+All queries use psycopg2 parameterized statements (`%s` placeholders). String interpolation in SQL is never used.
+
+### Element URIs
+
+Created elements get a human-readable URI derived from the title slug, suffixed with 6 hex chars for uniqueness. The update operation only supports changing the element title. Example of URI format :
+
+```
+"AI Assistant" → element:acme-projects:ai-assistant-a3f2b1
+```
+
+### Chat display
+
+The dashboard shows a timestamp (UTC+2) under each message. Consecutive messages from the same user are kept separate (not merged). Conversation history survives page refreshes.
+
+
+## Running the solution
+
+To run unit tests:
+```bash
+docker compose up --build pytest
+```
+
+## Development process
+
+The solution was built iteratively over several sessions, each focused on a specific layer or concern.
+
+**Apr 23: Project setup & schema analysis**
+Reviewed the full database schema (11 SQL files), mapped foreign key dependencies, and identified a gap in the sample data: `user_space_permissions` had no rows, making all write operations silently fail. Created a course notes document to track reasoning and decisions throughout the project.
+
+**Apr 24: DB layer & first agent tool**
+Built `db.py` with a `ThreadedConnectionPool` (thread-safe for Streamlit's background threads), a `get_cursor()` context manager, and parameterized queries throughout. Implemented the first LangChain tool (`search_elements_tool`) with a ReAct loop. Introduced 3-level error handling (tool → agent loop → `handle_user_input`) and switched `CURRENT_USER` to an environment variable to avoid hardcoded test users.
+
+**Apr 25: Orchestrator & conversation history**
+Built the orchestrator agent with `call_elements_agent_tool` as its single dispatch tool. Implemented `_build_history_messages()` to reconstruct full conversation turns from streamed `ChatMessage` chunks, giving the LLM proper multi-turn context. Added a system prompt to allow casual conversation without routing to an agent.
+
+**Apr 28: Latency optimisation & bug fixes**
+Identified that element tasks triggered 4 sequential LLM calls. Cut to 2 by returning tool results directly instead of re-summarising. Fixed a bug where the LLM passed `<nil>` as `space_uri` by adding a `list_spaces` discovery step. Improved streaming speed (3 chars / 0.15s → 15 chars / 0.03s).
+
+**Apr 29: Refactor & context pre-loading**
+Reorganised all agent code into `src/agents/` (llm.py, elements_agent.py, orchestrator.py). Added `_build_context()` to pre-inject a spaces/types mapping as a `SystemMessage`, removing the need for multi-step LLM discovery. Added `_is_element_task()` keyword short-circuit in the orchestrator, cutting latency from ~3m30s to ~1m46s. Extracted the shared `run_react_loop()`. Added a 5-minute context cache to avoid repeated DB queries.
+
+**Apr 29: Unit tests & evaluation review**
+Wrote a full unit test suite (48 tests across 5 files) covering the DB layer, tool output formatting, LLM tool call parsing, history reconstruction, and orchestrator routing. Added pytest infrastructure (pytest.ini, conftest.py with Ollama mock, Docker service).
+
+**May 2: QA, UX & model tuning**
+Ran end-to-end QA against all evaluation criteria. Fixed the missing write permissions in sample data. Switched LLM from `llama3.1` (~2 min/call on CPU) to `qwen2.5:3b` (faster, reliable tool calling). Fixed dashboard message merging (consecutive user messages were collapsed into one). Added UTC+2 timestamps and conversation persistence across page refreshes. Rewrote the elements agent system prompt to respond in plain language and hide URIs. Introduced human-readable element URIs built from title slugs. Added URI format validation in tools to allow the LLM to self-correct on bad inputs.
+
+
+## Known limitations
+
+- **Current user via env var** — there is no auth system in the dashboard. The active user is set through the `CURRENT_USER` environment variable (default: `user:alice`).
+- **Model choice** — `qwen2.5:3b` was selected over larger models to prioritise response time, since low latency is critical for a conversational interface. It occasionally misroutes ambiguous requests, but the DB-level permission check always acts as the safety net for write operations.
