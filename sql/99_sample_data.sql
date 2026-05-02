@@ -760,6 +760,26 @@ SELECT
 FROM generate_series(1, 100) AS i;
 
 -- =============================================================================
+-- USER SPACE PERMISSIONS (write access for all users in their spaces)
+-- =============================================================================
+INSERT INTO public.user_space_permissions (user_uri, space_uri, verb_uri) VALUES
+    ('user:alice',   'space:acme-projects',     'verb:write'),
+    ('user:alice',   'space:acme-hr',            'verb:write'),
+    ('user:bob',     'space:acme-projects',      'verb:write'),
+    ('user:charlie', 'space:acme-hr',            'verb:write'),
+    ('user:diana',   'space:globex-products',    'verb:write'),
+    ('user:diana',   'space:globex-customers',   'verb:write'),
+    ('user:edward',  'space:globex-products',    'verb:write'),
+    ('user:fiona',   'space:globex-customers',   'verb:write'),
+    ('user:george',  'space:initech-tasks',      'verb:write'),
+    ('user:george',  'space:initech-inventory',  'verb:write'),
+    ('user:hannah',  'space:initech-tasks',      'verb:write'),
+    ('user:ivan',    'space:initech-inventory',  'verb:write'),
+    ('user:julia',   'space:initech-tasks',      'verb:write'),
+    ('user:julia',   'space:initech-inventory',  'verb:write')
+ON CONFLICT DO NOTHING;
+
+-- =============================================================================
 -- SUMMARY: Total generated data
 -- - 10 Users
 -- - 3 Tenants
