@@ -7,7 +7,7 @@ from langchain_ollama import ChatOllama
 
 __all__ = ["_llm", "_parse_python_tag_calls", "run_react_loop"]
 
-_llm = ChatOllama(model="llama3.1", base_url="http://ollama:11434")
+_llm = ChatOllama(model="qwen2.5:3b", base_url="http://ollama:11434")
 
 
 def run_react_loop(
