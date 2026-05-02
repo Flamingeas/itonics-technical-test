@@ -2,7 +2,7 @@ import json
 import re
 from typing import Any
 
-from langchain_core.messages import AIMessage, ToolMessage
+from langchain_core.messages import AIMessage, BaseMessage, ToolMessage
 from langchain_ollama import ChatOllama
 
 __all__ = ["_llm", "_parse_python_tag_calls", "run_react_loop"]
@@ -11,7 +11,7 @@ _llm = ChatOllama(model="qwen2.5:3b", base_url="http://ollama:11434")
 
 
 def run_react_loop(
-    messages: list,
+    messages: list[BaseMessage | Any],
     llm_with_tools: Any,
     tool_map: dict[str, Any],
     stop_on: set[str] | None = None,
