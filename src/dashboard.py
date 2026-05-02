@@ -1,6 +1,7 @@
 import os
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 from typing import TypeAlias
 
 import streamlit as st
@@ -31,7 +32,10 @@ def set_streaming(value: bool) -> None:
 
 def render_history(history: ChatHistory) -> None:
     for message in history:
-        st.chat_message(message.role).write(message.content)
+        with st.chat_message(message.role):
+            st.write(message.content)
+            ts = datetime.fromtimestamp(message.timestamp, tz=timezone.utc).astimezone(timezone(timedelta(hours=2))).strftime("%b %d, %Y – %H:%M")
+            st.caption(ts)
 
 
 def merge_consecutive_messages(history: ChatHistory) -> None:
@@ -92,6 +96,7 @@ def render_chat_interface() -> None:
     broker = get_shared_broker()
     history = init_chat_history()
     hydrate_history_from_broker(history, broker)
+    set_conversation_history(history)
 
     prompt = st.chat_input("Send a message")
     if prompt:
