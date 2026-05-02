@@ -86,4 +86,4 @@ def handle_user_input(user_input: str) -> None:
         reply = run_orchestrator(user_input, history)
     except Exception as e:
         reply = f"Unexpected error: {e}"
-    stream_assistant_response(reply, interaction_id, chunk_size=15, delay=0.03)
+    stream_assistant_response(reply, interaction_id, chunk_size=50, delay=0.01)
