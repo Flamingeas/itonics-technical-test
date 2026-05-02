@@ -70,6 +70,26 @@ class TestCreateElement:
         assert result["uri"] == "element:acme:abc123"
         assert result["title"] == "My Idea"
 
+    def test_uri_slug_derived_from_title(self) -> None:
+        row = {"uri": "element:acme:cool-idea-abc123", "title": "Cool Idea", "type_uri": "type:idea",
+               "space_uri": "space:acme", "creation_date": 0, "author": "user:bob"}
+        ctx, cur = make_cursor(row)
+        with patch("db.has_permission", return_value=True):
+            with patch("db.get_cursor", ctx):
+                db.create_element("user:bob", "space:acme", "type:idea", "Cool Idea")
+        inserted_uri: str = cur.execute.call_args[0][1][0]
+        assert inserted_uri.startswith("element:acme:cool-idea-")
+
+    def test_uri_slug_falls_back_for_special_char_title(self) -> None:
+        row = {"uri": "element:acme:element-abc123", "title": "???", "type_uri": "type:idea",
+               "space_uri": "space:acme", "creation_date": 0, "author": "user:bob"}
+        ctx, cur = make_cursor(row)
+        with patch("db.has_permission", return_value=True):
+            with patch("db.get_cursor", ctx):
+                db.create_element("user:bob", "space:acme", "type:idea", "???")
+        inserted_uri: str = cur.execute.call_args[0][1][0]
+        assert inserted_uri.startswith("element:acme:element-")
+
 
 # ── update_element_title
 class TestUpdateElementTitle:
