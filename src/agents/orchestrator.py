@@ -37,6 +37,6 @@ def _is_element_task(message: str) -> bool:
 
 def run_orchestrator(user_message: str, history: list[BaseMessage]) -> str:
     if _is_element_task(user_message):
-        return run_elements_agent(user_message)
+        return run_elements_agent(user_message, history=history)
     messages: list = [_SYSTEM, *history, HumanMessage(content=user_message)]
     return run_react_loop(messages, _orchestrator_llm_with_tools, _orchestrator_tool_map)

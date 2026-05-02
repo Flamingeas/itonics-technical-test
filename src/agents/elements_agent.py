@@ -170,7 +170,7 @@ def _build_context() -> str:
     return context
 
 
-def run_elements_agent(user_message: str) -> str:
+def run_elements_agent(user_message: str, history: list | None = None) -> str:
     context = _build_context()
-    messages: list = [_SYSTEM, SystemMessage(content=context), HumanMessage(content=user_message)]
+    messages: list = [_SYSTEM, SystemMessage(content=context), *(history or []), HumanMessage(content=user_message)]
     return run_react_loop(messages, _llm_with_tools, _tool_map, stop_on=_ACTION_TOOLS)
