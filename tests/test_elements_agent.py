@@ -37,6 +37,21 @@ class TestSearchElementsTool:
             result = search_elements_tool.invoke({"space_uri": _SPACE, "query": "x"})
         assert "Database error" in result
 
+    def test_rejects_invalid_space_uri(self) -> None:
+        result = search_elements_tool.invoke({"space_uri": "hr:all", "query": ""})
+        assert "Invalid space_uri" in result
+
+    def test_default_query_is_empty_string(self) -> None:
+        with patch("db.search_elements", return_value=[]) as mock:
+            search_elements_tool.invoke({"space_uri": _SPACE})
+        mock.assert_called_once_with(_SPACE, "", limit=10)
+
+    def test_limit_param_is_passed_to_db(self) -> None:
+        rows = [{"uri": "element:acme:1", "title": "Latest"}]
+        with patch("db.search_elements", return_value=rows) as mock:
+            search_elements_tool.invoke({"space_uri": _SPACE, "query": "", "limit": 1})
+        mock.assert_called_once_with(_SPACE, "", limit=1)
+
 
 # ── create_element_tool
 class TestCreateElementTool:
@@ -65,6 +80,18 @@ class TestCreateElementTool:
                     {"space_uri": _SPACE, "type_uri": "type:idea", "title": "Fail"}
                 )
         assert "Database error" in result
+
+    def test_rejects_invalid_space_uri(self) -> None:
+        result = create_element_tool.invoke(
+            {"space_uri": "hr:all", "type_uri": "type:idea", "title": "Test"}
+        )
+        assert "Invalid space_uri" in result
+
+    def test_rejects_invalid_type_uri(self) -> None:
+        result = create_element_tool.invoke(
+            {"space_uri": _SPACE, "type_uri": "idea", "title": "Test"}
+        )
+        assert "Invalid type_uri" in result
 
 
 # ── update_element_title_tool
