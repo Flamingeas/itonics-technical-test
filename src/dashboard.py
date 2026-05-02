@@ -5,7 +5,7 @@ from typing import TypeAlias
 
 import streamlit as st
 
-from chat_context import get_shared_broker, set_conversation_history
+from chat_context import get_conversation_history, get_shared_broker, set_conversation_history
 from message_broker import ChatMessage, MessageBroker
 
 ChatHistory: TypeAlias = list[ChatMessage]
@@ -16,7 +16,8 @@ CHAT_MODE = os.getenv("CHAT_MODE", "example")  # example or solution
 
 def init_chat_history() -> ChatHistory:
     if "chat_history" not in st.session_state:
-        st.session_state.chat_history = []
+        # Restore from module-level history so messages survive a page refresh
+        st.session_state.chat_history = get_conversation_history()
     return st.session_state.chat_history
 
 
