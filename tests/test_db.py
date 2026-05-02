@@ -55,7 +55,7 @@ class TestSearchElements:
 
 # ── create_element
 class TestCreateElement:
-    def _permission_error_when_no_write_access(self) -> None:
+    def test_permission_error_when_no_write_access(self) -> None:
         with patch("db.has_permission", return_value=False):
             with pytest.raises(PermissionError):
                 db.create_element("user:bob", "space:acme", "type:idea", "My Idea")
@@ -102,14 +102,14 @@ class TestUpdateElementTitle:
             result = db.update_element_title("user:bob", "element:acme:abc", "New Title")
         assert result["title"] == "New Title"
 
-    def _value_error_when_el_not_found(self) -> None:
+    def test_value_error_when_el_not_found(self) -> None:
         # UPDATE null, SELECT null -> el missing
         ctx, _ = make_cursor(None, None)
         with patch("db.get_cursor", ctx):
             with pytest.raises(ValueError, match="not found"):
                 db.update_element_title("user:bob", "element:acme:missing", "X")
 
-    def _permission_error_when_no_access(self) -> None:
+    def test_permission_error_when_no_access(self) -> None:
         # UPDATE null, SELECT ok -> el exists but user can't write
         ctx, _ = make_cursor(None, {"space_uri": "space:acme"})
         with patch("db.get_cursor", ctx):
