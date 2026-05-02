@@ -45,22 +45,28 @@ def list_types_tool(space_uri: str) -> str:
 
 
 @tool
-def search_elements_tool(space_uri: str, query: str) -> str:
-    """Search for elements whose title contains *query* inside *space_uri*.
+def search_elements_tool(space_uri: str, query: str = "", limit: int = 10) -> str:
+    """Search for elements in a space by title keyword.
 
     Args:
         space_uri: URI of the space to search in (e.g. 'space:acme-projects').
         query: Keyword to look for in element titles (case-insensitive).
-               Use an empty string "" to list all elements in the space.
+               IMPORTANT: pass query="" (empty string) to list ALL elements.
+               Never pass "all", "everything", or similar words as the query.
+        limit: Max number of results to return. Use 1 for "latest" or "most recent".
+               Default is 10 for keyword searches, use 20 for full listings.
     """
+    if not space_uri.startswith("space:"):
+        return f"Invalid space_uri {space_uri!r}. Use the exact space_uri from the context (e.g. 'space:acme-projects')."
     try:
-        results = db.search_elements(space_uri, query)
+        results = db.search_elements(space_uri, query, limit=limit)
     except Exception as e:
         return f"Database error while searching elements: {e}"
     if not results:
         return f"No elements found in {space_uri!r} matching {query!r}."
     lines = [f"- {r['uri']}: {r['title']}" for r in results]
-    return "\n".join(lines)
+    total_hint = f"\n(showing {len(results)} results)" if len(results) == limit and limit > 1 else ""
+    return "\n".join(lines) + total_hint
 
 
 @tool
@@ -72,6 +78,10 @@ def create_element_tool(space_uri: str, type_uri: str, title: str) -> str:
         type_uri: URI of the element type (e.g. 'type:project').
         title: Title for the new element.
     """
+    if not space_uri.startswith("space:"):
+        return f"Invalid space_uri {space_uri!r}. Use the exact space_uri from the context (e.g. 'space:acme-projects')."
+    if not type_uri.startswith("type:"):
+        return f"Invalid type_uri {type_uri!r}. Use the exact type_uri from the context (e.g. 'type:project')."
     try:
         element = db.create_element(CURRENT_USER, space_uri, type_uri, title)
     except PermissionError as e:
@@ -105,9 +115,15 @@ _llm_with_tools = _llm.bind_tools(_tools)
 _tool_map = {t.name: t for t in _tools}
 
 _SYSTEM = SystemMessage(content=(
-    "Elements agent. Use the provided context to call tools with correct URIs. "
-    "For create/update: only use spaces with write=yes. "
-    "All tool parameters are required — never omit them."
+    "You are a helpful assistant managing elements in a workspace.\n"
+    "Rules:\n"
+    "- NEVER show URIs, JSON, or technical field names to the user. Use human-readable names only.\n"
+    "- Translate user language to URIs internally before calling tools.\n"
+    "- For create/update: only use spaces where write=yes.\n"
+    "- If the user's request is missing one piece of info (e.g. title), ask ONE short question.\n"
+    "- When an operation succeeds, confirm it in plain language (e.g. 'Done! I created \"My idea\" in Projects.').\n"
+    "- Only use the tools provided. Never invent tool names.\n"
+    "- All tool parameters are required — never omit them."
 ))
 
 # Discovery tools need a follow-up LLM call; action tools return a final answer.
@@ -132,14 +148,20 @@ def _build_context() -> str:
         return f"Could not load spaces: {e}"
     if not spaces:
         return "No spaces available for the current user."
-    lines = ["Available spaces (write: yes = you can create/update here):"]
+    lines = [
+        "IMPORTANT: Always use the exact space_uri and type_uri values listed below.",
+        "Never construct or guess URIs — copy them exactly as shown.",
+        "",
+        "Available spaces:",
+    ]
     for s in spaces:
-        lines.append(f"  - {s['uri']}: {s['name']} (write: {'yes' if s['can_write'] else 'no'})")
-        if s["can_write"]:
+        can_write = s["can_write"]
+        lines.append(f'  Display name: "{s["name"]}" | space_uri: "{s["uri"]}" | writable: {"yes" if can_write else "no"}')
+        if can_write:
             try:
                 types = db.list_types_in_space(s["uri"])
                 for t in types:
-                    lines.append(f"      type: {t['uri']} ({t['name']})")
+                    lines.append(f'    Display name: "{t["name"]}" | type_uri: "{t["uri"]}"')
             except Exception:
                 pass
     context = "\n".join(lines)
