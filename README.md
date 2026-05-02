@@ -311,3 +311,44 @@ The solution must be delivered in a Docker-friendly format:
 - Works immediately after cloning and running `docker compose up --build dashboard`
 - Multiple containers can be used if needed for your architecture
 - The existing `src/main.py` must remain as the entry point for the chat interface
+
+---
+
+# Solution (by Samyra Mangan Mben)
+
+## Approach
+
+The solution implements a two-agent architecture using **LangChain** (`0.3.14`) with **Ollama** (`qwen2.5:3b`) as the LLM backend.
+
+### Agent design
+
+```
+handle_user_input()  (src/main.py)
+        │
+        ▼
+  run_orchestrator()  (src/agents/orchestrator.py)
+        │
+        ├── keyword short-circuit (_is_element_task)
+        │       └──► run_elements_agent()  (direct, no extra LLM call)
+        │
+        └── LLM call (casual / ambiguous)
+                └──► call_elements_agent_tool  →  run_elements_agent()
+```
+
+**Orchestrator** — routes requests to the elements agent or responds directly to casual conversation. Common element-related keywords (search, create, update, find…) short-circuit the LLM routing step entirely, cutting latency roughly in half.
+
+**Elements agent** — handles all DB operations through five LangChain tools:
+
+| Tool | Operation |
+|---|---|
+| `list_spaces_tool` | Discover spaces the user can access |
+| `list_types_tool` | Discover element types in a space |
+| `search_elements_tool` | ILIKE search on element titles |
+| `create_element_tool` | Insert a new element |
+| `update_element_title_tool` | Rename an existing element |
+
+The agent runs a ReAct loop (`run_react_loop` in `src/agents/llm.py`). Discovery tools (list spaces, list types) loop back so the LLM can use their output; action tools (search, create, update) return immediately.
+
+### Context pre-loading
+
+Before the first LLM call, `_build_context()` queries the user's accessible spaces and the types of each writable space, then injects an explicit `name → uri` mapping as a `SystemMessage`. The LLM uses this to resolve natural language ("Projects", "Task") to the correct URIs internally, without ever exposing them to the user. The result is cached per user for 5 minutes to reduce DB round-trips.
