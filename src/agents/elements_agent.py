@@ -8,6 +8,7 @@ from langchain_core.tools import tool
 CURRENT_USER = os.getenv("CURRENT_USER")
 
 _context_cache: dict[str, tuple[str, float]] = {}  # user_uri -> context & timestamp
+_user_spaces: dict[str, set[str]] = {}  # user_uri -> set of accessible space URIs
 _CACHE_TTL = 300  # seconds; store for 4-5min
 
 
@@ -80,6 +81,8 @@ def create_element_tool(space_uri: str, type_uri: str, title: str) -> str:
     """
     if not space_uri.startswith("space:"):
         return f"Invalid space_uri {space_uri!r}. Use the exact space_uri from the context (e.g. 'space:acme-projects')."
+    if CURRENT_USER and space_uri not in _user_spaces.get(CURRENT_USER, set()):
+        return f"Space {space_uri!r} is not accessible to you. Use one of the spaces listed in the context."
     if not type_uri.startswith("type:"):
         return f"Invalid type_uri {type_uri!r}. Use the exact type_uri from the context (e.g. 'type:project')."
     try:
@@ -89,6 +92,25 @@ def create_element_tool(space_uri: str, type_uri: str, title: str) -> str:
     except Exception as e:
         return f"Database error while creating element: {e}"
     return f"Created element {element['uri']!r} with title {element['title']!r}."
+
+
+@tool
+def delete_element_tool(element_uri: str) -> str:
+    """Delete an element permanently.
+    Args:
+        element_uri: URI of the element to delete (e.g. 'element:acme-projects:ai-assistant-a3f2b1').
+    """
+    if not element_uri.startswith("element:"):
+        return f"Invalid element_uri {element_uri!r}. Use the exact URI from a previous search result."
+    try:
+        db.delete_element(CURRENT_USER, element_uri)
+    except PermissionError as e:
+        return f"Permission denied: {e}"
+    except ValueError as e:
+        return f"Element not found: {e}"
+    except Exception as e:
+        return f"Database error while deleting element: {e}"
+    return f"Element {element_uri!r} has been deleted."
 
 
 @tool
@@ -110,7 +132,7 @@ def update_element_title_tool(element_uri: str, new_title: str) -> str:
     return f"Updated element {element['uri']!r} — new title: {element['title']!r}."
 
 
-_tools = [list_spaces_tool, list_types_tool, search_elements_tool, create_element_tool, update_element_title_tool]
+_tools = [list_spaces_tool, list_types_tool, search_elements_tool, create_element_tool, update_element_title_tool, delete_element_tool]
 _llm_with_tools = _llm.bind_tools(_tools)
 _tool_map = {t.name: t for t in _tools}
 
@@ -127,7 +149,7 @@ _SYSTEM = SystemMessage(content=(
 ))
 
 # Discovery tools need a follow-up LLM call; action tools return a final answer.
-_ACTION_TOOLS = {"search_elements_tool", "create_element_tool", "update_element_title_tool"}
+_ACTION_TOOLS = {"search_elements_tool", "create_element_tool", "update_element_title_tool", "delete_element_tool"}
 
 
 def _build_context() -> str:
@@ -167,6 +189,7 @@ def _build_context() -> str:
     context = "\n".join(lines)
     if CURRENT_USER:
         _context_cache[CURRENT_USER] = (context, now)
+        _user_spaces[CURRENT_USER] = {s["uri"] for s in spaces}
     return context
 
 

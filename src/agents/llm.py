@@ -9,6 +9,8 @@ __all__ = ["_llm", "_parse_python_tag_calls", "run_react_loop"]
 
 _llm = ChatOllama(model="qwen2.5:3b", base_url="http://ollama:11434")
 
+_MAX_ITERATIONS = 6
+
 
 def run_react_loop(
     messages: list[BaseMessage | Any],
@@ -21,7 +23,7 @@ def run_react_loop(
     stop_on: tool names that trigger an immediate return.
              None means always return after the first tool batch (orchestrator).
     """
-    while True:
+    for _ in range(_MAX_ITERATIONS):
         try:
             response: AIMessage = llm_with_tools.invoke(messages)
         except Exception as e:
@@ -41,6 +43,7 @@ def run_react_loop(
             messages.append(ToolMessage(content=str(result), tool_call_id=tc["id"]))
         if stop_on is None or any(tc["name"] in stop_on for tc in tool_calls):
             return "\n".join(results)
+    return "I was unable to complete the request after several attempts. Please try rephrasing."
 
 
 def _parse_python_tag_calls(content: str) -> list[dict[str, Any]]:
