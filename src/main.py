@@ -11,9 +11,12 @@ Available functions:
 - stream_assistant_response(content, interaction_id): Stream an assistant response
 """
 
+import threading
+
 from langchain_core.messages import HumanMessage, AIMessage, BaseMessage
 
-from agents.elements_agent import CURRENT_USER
+from agents.elements_agent import CURRENT_USER, _build_context
+from agents.llm import _llm
 from agents.orchestrator import run_orchestrator
 from chat_utils import (
     generate_interaction_id,
@@ -22,6 +25,19 @@ from chat_utils import (
     stream_assistant_response,
 )
 from message_broker import ChatMessage
+
+
+def _warmup() -> None:
+    """Pre-load the LLM model into VRAM and prime the context cache."""
+    try:
+        _llm.invoke("hi")
+    except Exception:
+        pass
+    try:
+        _build_context()
+    except Exception:
+        pass
+threading.Thread(target=_warmup, daemon=True).start()
 
 
 def _build_history_messages(history: list[ChatMessage]) -> list[BaseMessage]:
