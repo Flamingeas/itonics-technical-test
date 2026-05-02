@@ -27,7 +27,10 @@ def is_streaming() -> bool:
 
 
 def set_streaming(value: bool) -> None:
-    st.session_state[STREAMING_KEY] = value
+    try:
+        st.session_state[STREAMING_KEY] = value
+    except Exception:
+        pass
 
 
 def render_history(history: ChatHistory) -> None:
@@ -45,7 +48,7 @@ def merge_consecutive_messages(history: ChatHistory) -> None:
 
     merged: ChatHistory = []
     for message in history:
-        if merged and merged[-1].role == message.role:
+        if merged and merged[-1].role == message.role and merged[-1].interaction_id == message.interaction_id:
             # Update the last message with concatenated content
             last_msg = merged[-1]
             merged[-1] = last_msg.model_copy(
