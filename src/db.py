@@ -1,4 +1,5 @@
 import os
+import re
 import threading
 import uuid
 import time
@@ -95,7 +96,8 @@ def create_element(user_uri: str, space_uri: str, type_uri: str, title: str) -> 
             f"User {user_uri!r} does not have write access to space {space_uri!r}."
         )
 
-    element_uri = f"element:{space_uri.split(':')[-1]}:{uuid.uuid4().hex}"
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:30]
+    element_uri = f"element:{space_uri.split(':')[-1]}:{slug}-{uuid.uuid4().hex[:6]}"
     sql = """
         INSERT INTO public.elements (uri, title, type_uri, space_uri, creation_date, author)
         VALUES (%s, %s, %s, %s, %s, %s)
