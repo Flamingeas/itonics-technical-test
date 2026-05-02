@@ -1,7 +1,8 @@
-"""Unit tests for main.py — conversation history reconstruction."""
+"""Unit tests for main.py — conversation history reconstruction and message merging."""
 from langchain_core.messages import HumanMessage, AIMessage
 
 from main import _build_history_messages
+from dashboard import merge_consecutive_messages
 from message_broker import ChatMessage
 
 
@@ -66,3 +67,34 @@ class TestBuildHistoryMessages:
         result = _build_history_messages(history)
         assert len(result) == 1
         assert isinstance(result[0], HumanMessage)
+
+
+class TestMergeConsecutiveMessages:
+    def test_same_role_same_id_are_merged(self) -> None:
+        """Streaming chunks with the same interaction_id must be concatenated."""
+        history = [
+            _msg("assistant", "Hello ", "id-1"),
+            _msg("assistant", "world", "id-1"),
+        ]
+        merge_consecutive_messages(history)
+        assert len(history) == 1
+        assert history[0].content == "Hello world"
+
+    def test_same_role_different_id_are_not_merged(self) -> None:
+        """Two user messages with different interaction_ids must stay separate."""
+        history = [
+            _msg("user", "First message", "id-1"),
+            _msg("user", "Second message", "id-2"),
+        ]
+        merge_consecutive_messages(history)
+        assert len(history) == 2
+        assert history[0].content == "First message"
+        assert history[1].content == "Second message"
+
+    def test_alternating_roles_are_never_merged(self) -> None:
+        history = [
+            _msg("user", "Question", "id-1"),
+            _msg("assistant", "Answer", "id-1"),
+        ]
+        merge_consecutive_messages(history)
+        assert len(history) == 2
