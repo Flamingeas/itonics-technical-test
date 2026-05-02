@@ -337,7 +337,7 @@ handle_user_input()  (src/main.py)
 
 **Orchestrator** — routes requests to the elements agent or responds directly to casual conversation. Common element-related keywords (search, create, update, find…) short-circuit the LLM routing step entirely, cutting latency roughly in half.
 
-**Elements agent** — handles all DB operations through five LangChain tools:
+**Elements agent** — handles all DB operations through six LangChain tools:
 
 | Tool | Operation |
 |---|---|
@@ -346,8 +346,9 @@ handle_user_input()  (src/main.py)
 | `search_elements_tool` | ILIKE search on element titles |
 | `create_element_tool` | Insert a new element |
 | `update_element_title_tool` | Rename an existing element |
+| `delete_element_tool` | Permanently delete an element |
 
-The agent runs a ReAct loop (`run_react_loop` in `src/agents/llm.py`). Discovery tools (list spaces, list types) loop back so the LLM can use their output; action tools (search, create, update) return immediately.
+The agent runs a ReAct loop (`run_react_loop` in `src/agents/llm.py`) capped at 3 iterations. `stop_on=set()` lets the loop run until the LLM produces a natural language response — this is what allows the agent to confirm a write operation and immediately follow up with the updated element list, all in one reply.
 
 ### Context pre-loading
 
@@ -355,7 +356,7 @@ Before the first LLM call, `_build_context()` queries the user's accessible spac
 
 ### Permission model
 
-Permissions are enforced at the space level via `user_space_permissions`. `db.has_permission(user_uri, space_uri, "verb:write")` is called inside `create_element` and `update_element_title` before any write. `PermissionError` propagates to the tool layer where it is caught and returned as a user-friendly message.
+Permissions are enforced at the space level via `user_space_permissions`. `db.has_permission(user_uri, space_uri, "verb:write")` is called inside `create_element`, `update_element_title`, and `delete_element` before any write. `PermissionError` propagates to the tool layer where it is caught and returned as a user-friendly message. `create_element_tool` also validates the target space against a cached `_user_spaces` set, rejecting hallucinated URIs before they reach the DB.
 
 
 ### SQL safety
@@ -406,6 +407,9 @@ Wrote a full unit test suite (48 tests across 5 files) covering the DB layer, to
 
 **May 2: QA, UX & model tuning**
 Ran end-to-end QA against all evaluation criteria. Fixed the missing write permissions in sample data. Switched LLM from `llama3.1` (~2 min/call on CPU) to `qwen2.5:3b` (faster, reliable tool calling). Fixed dashboard message merging (consecutive user messages were collapsed into one). Added UTC+2 timestamps and conversation persistence across page refreshes. Rewrote the elements agent system prompt to respond in plain language and hide URIs. Introduced human-readable element URIs built from title slugs. Added URI format validation in tools to allow the LLM to self-correct on bad inputs.
+
+**May 3: Delete feature & UX polish**
+Added `delete_element_tool` with `db.delete_element()` — raises `ValueError` if the element doesn't exist and `PermissionError` if the user lacks write access on its space. Switched the ReAct loop to `stop_on=set()` so that after any write operation the LLM can confirm success and show the updated element list in one reply, removing the need for the user to ask a follow-up. Added a `_GENERIC_QUERIES` sanitisation step in `search_elements_tool` that converts broad terms ("elements", "list", "show", "all") to `query=""`, preventing the LLM from triggering a no-match loop that would cause a multi-minute freeze. Added a `_warmup()` daemon thread in `main.py` that pre-loads the LLM model into VRAM and primes the context cache before the first user message arrives.
 
 
 ## Known limitations
