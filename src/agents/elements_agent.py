@@ -159,8 +159,7 @@ _SYSTEM = SystemMessage(content=(
     "- If the user's request is missing one piece of info (e.g. title), ask ONE short question.\n"
     "- After create or update, confirm success in plain language.\n"
     "- After delete, the tool already returns the updated list — just present it to the user.\n"
-    "- Only use the tools provided. Never invent tool names.\n"
-    "- All tool parameters are required — never omit them."
+    "- NEVER list elements from memory. Always call search_elements_tool to get live data."
 ))
 
 

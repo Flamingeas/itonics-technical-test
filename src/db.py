@@ -68,7 +68,7 @@ def search_elements(space_uri: str, query: str, limit: int = 10) -> list[dict[st
         FROM public.elements
         WHERE space_uri = %s
           AND title ILIKE %s
-        ORDER BY creation_date DESC
+        ORDER BY creation_date DESC, uri ASC
         LIMIT %s
     """
     with get_cursor() as cur:
