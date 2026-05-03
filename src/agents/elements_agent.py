@@ -45,6 +45,9 @@ def list_types_tool(space_uri: str) -> str:
     return "\n".join(lines)
 
 
+_GENERIC_QUERIES = {"all", "everything", "elements", "list", "show", "tasks", "items", "any", "every"}
+
+
 @tool
 def search_elements_tool(space_uri: str, query: str = "", limit: int = 10) -> str:
     """Search for elements in a space by title keyword.
@@ -57,6 +60,8 @@ def search_elements_tool(space_uri: str, query: str = "", limit: int = 10) -> st
         limit: Max number of results to return. Use 1 for "latest" or "most recent".
                Default is 10 for keyword searches, use 20 for full listings.
     """
+    if query.lower() in _GENERIC_QUERIES:
+        query = ""
     if not space_uri.startswith("space:"):
         return f"Invalid space_uri {space_uri!r}. Use the exact space_uri from the context (e.g. 'space:acme-projects')."
     try:
@@ -91,7 +96,7 @@ def create_element_tool(space_uri: str, type_uri: str, title: str) -> str:
         return f"Permission denied: {e}"
     except Exception as e:
         return f"Database error while creating element: {e}"
-    return f"Created element {element['uri']!r} with title {element['title']!r}."
+    return f"Created \"{element['title']}\" successfully."
 
 
 @tool
@@ -100,17 +105,23 @@ def delete_element_tool(element_uri: str) -> str:
     Args:
         element_uri: URI of the element to delete (e.g. 'element:acme-projects:ai-assistant-a3f2b1').
     """
-    if not element_uri.startswith("element:"):
-        return f"Invalid element_uri {element_uri!r}. Use the exact URI from a previous search result."
+    if "{{" in element_uri or not element_uri.startswith("element:"):
+        return f"Invalid element_uri {element_uri!r}. You must first call search_elements_tool to get the exact URI, then pass it here."
     try:
-        db.delete_element(CURRENT_USER, element_uri)
+        space_uri = db.delete_element(CURRENT_USER, element_uri)
     except PermissionError as e:
         return f"Permission denied: {e}"
     except ValueError as e:
         return f"Element not found: {e}"
     except Exception as e:
         return f"Database error while deleting element: {e}"
-    return f"Element {element_uri!r} has been deleted."
+    try:
+        remaining = db.search_elements(space_uri, "", limit=20)
+        lines = [f"- {r['title']}" for r in remaining]
+        list_str = "\n".join(lines) if lines else "(no elements remaining)"
+    except Exception:
+        list_str = "(could not fetch updated list)"
+    return f"Deleted successfully.\n\nCurrent elements:\n{list_str}"
 
 
 @tool
@@ -129,7 +140,7 @@ def update_element_title_tool(element_uri: str, new_title: str) -> str:
         return f"Element not found: {e}"
     except Exception as e:
         return f"Database error while updating element: {e}"
-    return f"Updated element {element['uri']!r} — new title: {element['title']!r}."
+    return f"Updated title to \"{element['title']}\" successfully."
 
 
 _tools = [list_spaces_tool, list_types_tool, search_elements_tool, create_element_tool, update_element_title_tool, delete_element_tool]
@@ -140,16 +151,17 @@ _SYSTEM = SystemMessage(content=(
     "You are a helpful assistant managing elements in a workspace.\n"
     "Rules:\n"
     "- NEVER show URIs, JSON, or technical field names to the user. Use human-readable names only.\n"
+    "- NEVER use markdown links or hyperlinks. Plain text only — no [text](url) syntax.\n"
     "- Translate user language to URIs internally before calling tools.\n"
-    "- For create/update: only use spaces where write=yes.\n"
+    "- For create/update/delete: only use spaces where write=yes.\n"
+    "- To delete or update an element, always call search_elements_tool first to get the exact URI.\n"
+    "- Never ask for information the user has already provided in their message.\n"
     "- If the user's request is missing one piece of info (e.g. title), ask ONE short question.\n"
-    "- When an operation succeeds, confirm it in plain language (e.g. 'Done! I created \"My idea\" in Projects.').\n"
+    "- After create or update, confirm success in plain language.\n"
+    "- After delete, the tool already returns the updated list — just present it to the user.\n"
     "- Only use the tools provided. Never invent tool names.\n"
     "- All tool parameters are required — never omit them."
 ))
-
-# Discovery tools need a follow-up LLM call; action tools return a final answer.
-_ACTION_TOOLS = {"search_elements_tool", "create_element_tool", "update_element_title_tool", "delete_element_tool"}
 
 
 def _build_context() -> str:
@@ -196,4 +208,4 @@ def _build_context() -> str:
 def run_elements_agent(user_message: str, history: list | None = None) -> str:
     context = _build_context()
     messages: list = [_SYSTEM, SystemMessage(content=context), *(history or []), HumanMessage(content=user_message)]
-    return run_react_loop(messages, _llm_with_tools, _tool_map, stop_on=_ACTION_TOOLS)
+    return run_react_loop(messages, _llm_with_tools, _tool_map, stop_on=set())

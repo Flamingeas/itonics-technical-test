@@ -98,14 +98,14 @@ def create_element(user_uri: str, space_uri: str, type_uri: str, title: str) -> 
 
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")[:30] or "element"
     element_uri = f"element:{space_uri.split(':')[-1]}:{slug}-{uuid.uuid4().hex[:6]}"
+    now = int(time.time() * 1000)
     sql = """
         INSERT INTO public.elements (uri, title, type_uri, space_uri, creation_date, author)
         VALUES (%s, %s, %s, %s, %s, %s)
         RETURNING uri, title, type_uri, space_uri, creation_date, author
     """
-    creation_date = int(time.time() * 1000)
     with get_cursor() as cur:
-        cur.execute(sql, (element_uri, title, type_uri, space_uri, creation_date, user_uri))
+        cur.execute(sql, (element_uri, title, type_uri, space_uri, now, user_uri))
         row = cur.fetchone()
         return dict(row)
 
@@ -144,14 +144,7 @@ def list_types_in_space(space_uri: str) -> list[dict[str, Any]]:
 def delete_element(user_uri: str, element_uri: str) -> str:
     """Delete an element. Raises ValueError if not found, PermissionError if unauthorized."""
     check_sql = "SELECT space_uri FROM public.elements WHERE uri = %s"
-    delete_sql = """
-        DELETE FROM public.elements e
-        USING public.user_space_permissions p
-        WHERE e.uri = %s
-          AND p.user_uri = %s
-          AND p.space_uri = e.space_uri
-          AND p.verb_uri = %s
-    """
+    delete_sql = "DELETE FROM public.elements WHERE uri = %s"
     with get_cursor() as cur:
         cur.execute(check_sql, (element_uri,))
         row = cur.fetchone()
@@ -161,8 +154,10 @@ def delete_element(user_uri: str, element_uri: str) -> str:
             raise PermissionError(
                 f"User {user_uri!r} does not have write access to the element's space."
             )
-        cur.execute(delete_sql, (element_uri, user_uri, WRITE_VERB))
-    return element_uri
+        cur.execute(delete_sql, (element_uri,))
+        if cur.rowcount == 0:
+            raise ValueError(f"Element {element_uri!r} could not be deleted.")
+    return str(row["space_uri"])
 
 
 def update_element_title(user_uri: str, element_uri: str, new_title: str) -> dict[str, Any]:

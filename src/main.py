@@ -28,11 +28,7 @@ from message_broker import ChatMessage
 
 
 def _warmup() -> None:
-    """Pre-load the LLM model into VRAM and prime the context cache."""
-    try:
-        _llm.invoke("hi")
-    except Exception:
-        pass
+    """Prime the context cache before the first user message arrives."""
     try:
         _build_context()
     except Exception:
