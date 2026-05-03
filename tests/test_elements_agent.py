@@ -7,6 +7,7 @@ import agents.elements_agent as ea
 from agents.elements_agent import (
     search_elements_tool,
     create_element_tool,
+    delete_element_tool,
     update_element_title_tool,
     _build_context,
     _context_cache,
@@ -62,7 +63,7 @@ class TestCreateElementTool:
                 result = create_element_tool.invoke(
                     {"space_uri": _SPACE, "type_uri": "type:idea", "title": "New Idea"}
                 )
-        assert "Created element" in result
+        assert "Created" in result
         assert "New Idea" in result
 
     def test_returns_permission_denied_message(self) -> None:
@@ -94,6 +95,62 @@ class TestCreateElementTool:
         assert "Invalid type_uri" in result
 
 
+# ── delete_element_tool
+class TestDeleteElementTool:
+    _URI = "element:acme:abc123"
+
+    def test_returns_success_message(self) -> None:
+        remaining = [{"uri": "element:acme:xyz", "title": "Other Idea"}]
+        with patch("agents.elements_agent.CURRENT_USER", _USER):
+            with patch("db.delete_element", return_value=_SPACE):
+                with patch("db.search_elements", return_value=remaining):
+                    result = delete_element_tool.invoke({"element_uri": self._URI})
+        assert "Deleted successfully" in result
+        assert "Other Idea" in result
+
+    def test_shows_no_elements_remaining_when_space_empty(self) -> None:
+        with patch("agents.elements_agent.CURRENT_USER", _USER):
+            with patch("db.delete_element", return_value=_SPACE):
+                with patch("db.search_elements", return_value=[]):
+                    result = delete_element_tool.invoke({"element_uri": self._URI})
+        assert "Deleted successfully" in result
+        assert "no elements remaining" in result
+
+    def test_returns_permission_denied_message(self) -> None:
+        with patch("agents.elements_agent.CURRENT_USER", _USER):
+            with patch("db.delete_element", side_effect=PermissionError("no write access")):
+                result = delete_element_tool.invoke({"element_uri": self._URI})
+        assert "Permission denied" in result
+
+    def test_returns_not_found_message(self) -> None:
+        with patch("agents.elements_agent.CURRENT_USER", _USER):
+            with patch("db.delete_element", side_effect=ValueError("not found")):
+                result = delete_element_tool.invoke({"element_uri": self._URI})
+        assert "Element not found" in result
+
+    def test_returns_error_message_on_db_failure(self) -> None:
+        with patch("agents.elements_agent.CURRENT_USER", _USER):
+            with patch("db.delete_element", side_effect=Exception("timeout")):
+                result = delete_element_tool.invoke({"element_uri": self._URI})
+        assert "Database error" in result
+
+    def test_rejects_invalid_element_uri(self) -> None:
+        result = delete_element_tool.invoke({"element_uri": "space:acme"})
+        assert "Invalid element_uri" in result
+
+    def test_rejects_template_placeholder_uri(self) -> None:
+        result = delete_element_tool.invoke({"element_uri": "element:{{space}}:{{id}}"})
+        assert "Invalid element_uri" in result
+
+    def test_handles_search_failure_after_deletion(self) -> None:
+        with patch("agents.elements_agent.CURRENT_USER", _USER):
+            with patch("db.delete_element", return_value=_SPACE):
+                with patch("db.search_elements", side_effect=Exception("DB down")):
+                    result = delete_element_tool.invoke({"element_uri": self._URI})
+        assert "Deleted successfully" in result
+        assert "could not fetch" in result
+
+
 # ── update_element_title_tool
 class TestUpdateElementTitleTool:
     def test_returns_success_message(self) -> None:
@@ -103,7 +160,7 @@ class TestUpdateElementTitleTool:
                 result = update_element_title_tool.invoke(
                     {"element_uri": "element:acme:abc", "new_title": "Updated Title"}
                 )
-        assert "Updated element" in result
+        assert "Updated" in result
         assert "Updated Title" in result
 
     def test_returns_permission_denied_message(self) -> None:
