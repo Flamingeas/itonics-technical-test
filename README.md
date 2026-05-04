@@ -337,7 +337,7 @@ handle_user_input()  (src/main.py)
 
 **Orchestrator** — routes requests to the elements agent or responds directly to casual conversation. Common element-related keywords (search, create, update, find…) short-circuit the LLM routing step entirely, cutting latency roughly in half.
 
-**Elements agent** — handles all DB operations through six LangChain tools:
+**Elements agent** — handles all DB operations through five LangChain tools:
 
 | Tool | Operation |
 |---|---|
@@ -346,17 +346,16 @@ handle_user_input()  (src/main.py)
 | `search_elements_tool` | ILIKE search on element titles |
 | `create_element_tool` | Insert a new element |
 | `update_element_title_tool` | Rename an existing element |
-| `delete_element_tool` | Permanently delete an element |
 
 The agent runs a ReAct loop (`run_react_loop` in `src/agents/llm.py`) capped at 3 iterations. `stop_on=set()` lets the loop run until the LLM produces a natural language response — this is what allows the agent to confirm a write operation and immediately follow up with the updated element list, all in one reply.
 
 ### Context pre-loading
 
-Before the first LLM call, `_build_context()` queries the user's accessible spaces and the types of each writable space, then injects an explicit `name → uri` mapping as a `SystemMessage`. The LLM uses this to resolve natural language ("Projects", "Task") to the correct URIs internally, without ever exposing them to the user. The result is cached per user for 5 minutes to reduce DB round-trips.
+Before the first LLM call, `_build_context()` queries the user's accessible spaces and the types of each writable space, then injects an explicit `name → uri` mapping as a `SystemMessage`. Each space entry also includes its URI slug as an alias (e.g. `"initech-tasks"`) so the LLM can match informal user references ("initech tasks") to the correct `space_uri` without hallucinating. The result is cached per user for 5 minutes to reduce DB round-trips.
 
 ### Permission model
 
-Permissions are enforced at the space level via `user_space_permissions`. `db.has_permission(user_uri, space_uri, "verb:write")` is called inside `create_element`, `update_element_title`, and `delete_element` before any write. `PermissionError` propagates to the tool layer where it is caught and returned as a user-friendly message. `create_element_tool` also validates the target space against a cached `_user_spaces` set, rejecting hallucinated URIs before they reach the DB.
+Permissions are enforced at the space level via `user_space_permissions`. `db.has_permission(user_uri, space_uri, "verb:write")` is called inside `create_element` and `update_element_title` before any write. `PermissionError` propagates to the tool layer where it is caught and returned as a user-friendly message. Both `create_element_tool` and `search_elements_tool` also validate the target space against a cached `_user_spaces` set — rejecting unknown or hallucinated URIs before they reach the DB, and returning the list of valid spaces so the LLM can self-correct.
 
 
 ### SQL safety
@@ -408,11 +407,15 @@ Wrote a full unit test suite (48 tests across 5 files) covering the DB layer, to
 **May 2: QA, UX & model tuning**
 Ran end-to-end QA against all evaluation criteria. Fixed the missing write permissions in sample data. Switched LLM from `llama3.1` (~2 min/call on CPU) to `qwen2.5:3b` (faster, reliable tool calling). Fixed dashboard message merging (consecutive user messages were collapsed into one). Added UTC+2 timestamps and conversation persistence across page refreshes. Rewrote the elements agent system prompt to respond in plain language and hide URIs. Introduced human-readable element URIs built from title slugs. Added URI format validation in tools to allow the LLM to self-correct on bad inputs.
 
-**May 3: Delete feature & UX polish**
-Added `delete_element_tool` with `db.delete_element()` — raises `ValueError` if the element doesn't exist and `PermissionError` if the user lacks write access on its space. Switched the ReAct loop to `stop_on=set()` so that after any write operation the LLM can confirm success and show the updated element list in one reply, removing the need for the user to ask a follow-up. Added a `_GENERIC_QUERIES` sanitisation step in `search_elements_tool` that converts broad terms ("elements", "list", "show", "all") to `query=""`, preventing the LLM from triggering a no-match loop that would cause a multi-minute freeze. Added a `_warmup()` daemon thread in `main.py` that pre-loads the LLM model into VRAM and primes the context cache before the first user message arrives.
+**May 3: ReAct loop improvement & UX polish**
+Switched the ReAct loop to `stop_on=set()` so that after any write operation the LLM can confirm success and show the updated element list in one reply, removing the need for the user to ask a follow-up. Added a `_GENERIC_QUERIES` sanitisation step in `search_elements_tool` that converts broad terms ("elements", "list", "show", "all") to `query=""`, preventing the LLM from triggering a no-match loop that would cause a multi-minute freeze. Added a `_warmup()` daemon thread in `main.py` that pre-loads the LLM model into VRAM and primes the context cache before the first user message arrives.
+
+**May 4: Remove delete feature**
+Removed `delete_element_tool` and `db.delete_element()` after QA revealed that the LLM hallucinated successful deletions without ever calling the tool — confirming "Deleted successfully" to the user while the element remained in the database. The root cause is a known limitation of small models (`qwen2.5:3b`): they tend to fabricate tool call results rather than execute them when the input doesn't match exactly. Since the task specification does not require delete, the feature was dropped entirely to avoid exposing a silently broken operation. All related unit tests and system prompt instructions were also removed.
 
 
 ## Known limitations
 
 - **Current user via env var** — there is no auth system in the dashboard. The active user is set through the `CURRENT_USER` environment variable (default: `user:alice`).
 - **Model choice** — `qwen2.5:3b` was selected over larger models to prioritise response time, since low latency is critical for a conversational interface. It occasionally misroutes ambiguous requests, but the DB-level permission check always acts as the safety net for write operations.
+- **First-time startup** — on the first run, the Ollama container pulls the `qwen2.5:3b` model (~3.8 GB). `docker compose up --build dashboard` will wait automatically until the pull completes before starting the dashboard (the healthcheck allows up to ~15 minutes). Subsequent starts reuse the cached volume and take only a few seconds.

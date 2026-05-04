@@ -64,6 +64,10 @@ def search_elements_tool(space_uri: str, query: str = "", limit: int = 10) -> st
         query = ""
     if not space_uri.startswith("space:"):
         return f"Invalid space_uri {space_uri!r}. Use the exact space_uri from the context (e.g. 'space:acme-projects')."
+    accessible = _user_spaces.get(CURRENT_USER, set()) if CURRENT_USER else set()
+    if accessible and space_uri not in accessible:
+        valid = ", ".join(f'"{s}"' for s in sorted(accessible))
+        return f"Unknown space_uri {space_uri!r}. Valid spaces are: {valid}. Use one of these exactly."
     try:
         results = db.search_elements(space_uri, query, limit=limit)
     except Exception as e:
@@ -99,30 +103,6 @@ def create_element_tool(space_uri: str, type_uri: str, title: str) -> str:
     return f"Created \"{element['title']}\" successfully."
 
 
-@tool
-def delete_element_tool(element_uri: str) -> str:
-    """Delete an element permanently.
-    Args:
-        element_uri: URI of the element to delete (e.g. 'element:acme-projects:ai-assistant-a3f2b1').
-    """
-    if "{{" in element_uri or not element_uri.startswith("element:"):
-        return f"Invalid element_uri {element_uri!r}. You must first call search_elements_tool to get the exact URI, then pass it here."
-    try:
-        space_uri = db.delete_element(CURRENT_USER, element_uri)
-    except PermissionError as e:
-        return f"Permission denied: {e}"
-    except ValueError as e:
-        return f"Element not found: {e}"
-    except Exception as e:
-        return f"Database error while deleting element: {e}"
-    try:
-        remaining = db.search_elements(space_uri, "", limit=20)
-        lines = [f"- {r['title']}" for r in remaining]
-        list_str = "\n".join(lines) if lines else "(no elements remaining)"
-    except Exception:
-        list_str = "(could not fetch updated list)"
-    return f"Deleted successfully.\n\nCurrent elements:\n{list_str}"
-
 
 @tool
 def update_element_title_tool(element_uri: str, new_title: str) -> str:
@@ -143,23 +123,20 @@ def update_element_title_tool(element_uri: str, new_title: str) -> str:
     return f"Updated title to \"{element['title']}\" successfully."
 
 
-_tools = [list_spaces_tool, list_types_tool, search_elements_tool, create_element_tool, update_element_title_tool, delete_element_tool]
+_tools = [list_spaces_tool, list_types_tool, search_elements_tool, create_element_tool, update_element_title_tool]
 _llm_with_tools = _llm.bind_tools(_tools)
 _tool_map = {t.name: t for t in _tools}
 
 _SYSTEM = SystemMessage(content=(
     "You are a helpful assistant managing elements in a workspace.\n"
     "Rules:\n"
-    "- NEVER show URIs, JSON, or technical field names to the user. Use human-readable names only.\n"
-    "- NEVER use markdown links or hyperlinks. Plain text only — no [text](url) syntax.\n"
-    "- Translate user language to URIs internally before calling tools.\n"
-    "- For create/update/delete: only use spaces where write=yes.\n"
-    "- To delete or update an element, always call search_elements_tool first to get the exact URI.\n"
-    "- Never ask for information the user has already provided in their message.\n"
-    "- If the user's request is missing one piece of info (e.g. title), ask ONE short question.\n"
-    "- After create or update, confirm success in plain language.\n"
-    "- After delete, the tool already returns the updated list — just present it to the user.\n"
-    "- NEVER list elements from memory. Always call search_elements_tool to get live data."
+    "- NEVER show URIs, JSON, or technical field names. Use human-readable names only. Plain text only — no markdown links.\n"
+    "- NEVER list elements from memory. Always call search_elements_tool to get live data.\n"
+    "- Refer to results as 'elements' or by their type name (e.g. 'tickets'), never as 'ideas'.\n"
+    "- For create/update: if the requested space is not in your context or is not writable, say so. NEVER redirect to a different space.\n"
+    "- To update an element, ALWAYS call search_elements_tool first to get the exact URI.\n"
+    "- If a piece of info is missing, ask ONE short question. Never ask for what the user already provided.\n"
+    "- CRITICAL: always call the appropriate tool. Never confirm an action unless the tool succeeded. Report tool errors to the user."
 ))
 
 
@@ -189,7 +166,8 @@ def _build_context() -> str:
     ]
     for s in spaces:
         can_write = s["can_write"]
-        lines.append(f'  Display name: "{s["name"]}" | space_uri: "{s["uri"]}" | writable: {"yes" if can_write else "no"}')
+        slug = s["uri"].split(":", 1)[-1]  # e.g. "space:initech-tasks" → "initech-tasks"
+        lines.append(f'  Display name: "{s["name"]}" | also known as: "{slug}" | space_uri: "{s["uri"]}" | writable: {"yes" if can_write else "no"}')
         if can_write:
             try:
                 types = db.list_types_in_space(s["uri"])

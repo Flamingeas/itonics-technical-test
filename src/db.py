@@ -141,25 +141,6 @@ def list_types_in_space(space_uri: str) -> list[dict[str, Any]]:
         return [dict(row) for row in cur.fetchall()]
 
 
-def delete_element(user_uri: str, element_uri: str) -> str:
-    """Delete an element. Raises ValueError if not found, PermissionError if unauthorized."""
-    check_sql = "SELECT space_uri FROM public.elements WHERE uri = %s"
-    delete_sql = "DELETE FROM public.elements WHERE uri = %s"
-    with get_cursor() as cur:
-        cur.execute(check_sql, (element_uri,))
-        row = cur.fetchone()
-        if row is None:
-            raise ValueError(f"Element {element_uri!r} not found.")
-        if not has_permission(user_uri, str(row["space_uri"]), WRITE_VERB):
-            raise PermissionError(
-                f"User {user_uri!r} does not have write access to the element's space."
-            )
-        cur.execute(delete_sql, (element_uri,))
-        if cur.rowcount == 0:
-            raise ValueError(f"Element {element_uri!r} could not be deleted.")
-    return str(row["space_uri"])
-
-
 def update_element_title(user_uri: str, element_uri: str, new_title: str) -> dict[str, Any]:
     """Update an element's title atomically. Raises ValueError if not found, PermissionError if unauthorized."""
     update_sql = """

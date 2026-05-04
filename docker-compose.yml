@@ -11,8 +11,8 @@ services:
       test: ["CMD-SHELL", "ollama list 2>/dev/null | grep -q qwen2.5 || exit 1"]
       interval: 15s
       timeout: 10s
-      retries: 20
-      start_period: 30s
+      retries: 40
+      start_period: 300s
   dashboard:
     build:
       context: .
